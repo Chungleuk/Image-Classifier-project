@@ -26,9 +26,7 @@ def main():
     Main function for predict.py - Loads a model checkpoint from a saved model.
     Loads the category class names from the *.json file. 
     Predicts the output along with top k probabilities.
-    If the *.json file was provided, the output is predicted in category names,
-    otherwise output is predicted in category index.
-    Plots the image and the top k probabilities in a horizontal bar chart.
+    
     """
     #Measures total program runtime by collecting start time
     start_time = time.time()
@@ -51,8 +49,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     probs_tensor, classes_tensor = predict(in_arg.input, model.to(device), in_arg.top_k)
     #model.cuda()
-    # Convert the probabilities and classes tensors into lists
-    probs = probs_tensor.tolist()[0]
+
     # If the category mapping file was provided, make a list of names
     if in_arg.category_names!='':
         classes = [model.class_to_idx[str(sorted(model.class_to_idx)[i])] for i in (classes_tensor).tolist()[0]]
