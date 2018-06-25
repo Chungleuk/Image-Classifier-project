@@ -3,170 +3,112 @@
 #                                                                             
 # PROGRAMMER: Chung Leuk Lee.
 # DATE CREATED: 06/09/2018                                  
-# REVISED DATE: 06/16/2018  #modiy and test/fail
-# PURPOSE: Check images & report results: read them in, predict their
-#          content (classifier), compare prediction to actual value labels
-#          and output results
+# REVISED DATE: 06/23/2018  #modify and test2
+# PURPOSE: 
+#          This script Check images & report results: 
+#          read them in, predict their content (classifier), 
+#          compare prediction to actual value labels
+#          and output results.   
 #
-# Use argparse Expected Call with <> indicating expected user input:
-#      python check_images.py --dir <directory with images> --arch <model>
-#             --dogfile <file that contains dognames>
-#   Example call:
+#    Example call:
 #    python predict.py --pth vgg.pth --dir flowers/valid/1/image_06739.jpg 
 ##
-#Imports python modules
-from collections import OrderedDict
-import matplotlib.pyplot as plt
-import numpy as np
-from PIL import Image
 
-import torch
-from torch import nn
-from torch import optim
-import torch.nn.functional as F
-import torchvision
-from torchvision import datasets, transforms, models
-from torch.autograd import Variable
 
 import argparse
-from time import time, sleep
+from PIL import Image
+import time
+import json
+from Image_Classifier import *
 
 def main():
-    # Measures total program runtime by collecting start time
-    start_time = time()
+    """
+    Main function for predict.py - Loads a model checkpoint from a saved model.
+    Loads the category class names from the *.json file. 
+    Predicts the output along with top k probabilities.
+    If the *.json file was provided, the output is predicted in category names,
+    otherwise output is predicted in category index.
+    Plots the image and the top k probabilities in a horizontal bar chart.
+    """
+    #Measures total program runtime by collecting start time
+    start_time = time.time()
     
-    # Creates & retrieves Command Line Arugments
-    in_arg = get_input_args() 
-    
-    model, optimizer, loss, class_to_idx = load_checkpoint(in_arg.pth)
-    
-    image = process_image(in_arg.dir)
-    
-    predict(image, model, topk=5)
-        
-    # Measure total program runtime by collecting end time
-    end_time = time()
-    
-    # Computes overall runtime in seconds & prints it in hh:mm:ss format
-    tot_time = end_time - start_time
-    print("\n** Total Elapsed Runtime:",
-          str(int((tot_time/3600)))+":"+str(int((tot_time%3600)/60))+":"
-          +str(int((tot_time%3600)%60)) )
+    #Creates & retrieves Command Line Arugments
+    in_arg = get_input_args()
 
-# Functions defined below
+    # Load the model checkpoint
+    print("\nLoading model checkpoint: {}\n".format(in_arg.checkpoint))
+    model, accuracy = load_checkpoint(in_arg.checkpoint)
+
+    # Get the category names mapping if the file was provided
+    if in_arg.category_names!='':
+        with open(in_arg.category_names, 'r') as f:
+            cat_to_name = json.load(f)
+        model.class_to_idx = cat_to_name
+
+    # Predict the probabilities and top k classes
+    print("Predicting image category...")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    probs_tensor, classes_tensor = predict(in_arg.input, model.to(device), in_arg.top_k)
+    #model.cuda()
+    # Convert the probabilities and classes tensors into lists
+    probs = probs_tensor.tolist()[0]
+    # If the category mapping file was provided, make a list of names
+    if in_arg.category_names!='':
+        classes = [model.class_to_idx[str(sorted(model.class_to_idx)[i])] for i in (classes_tensor).tolist()[0]]
+    # Otherwise create a list of index numbers
+    else:
+        classes = classes_tensor.tolist()[0]
+      # Convert the probabilities and classes tensors into lists
+    probs = probs_tensor.data[0].cpu().numpy()
+    probs = np.exp(probs)
+	# Print the predicted category to output
+    print("Given image: {}".format(in_arg.input))
+    print("Predicted category: {}".format(classes))
+    print("Predicted probability: {} % ".format(probs*100))
+  
+    #Measure total program runtime by collecting end time
+    end_time = time.time()
+
+    #Computes overall runtime in seconds & prints it in hh:mm:ss format
+    tot_time = end_time - start_time
+    print("\n** Total Elapsed Runtime:", str(int((tot_time / 3600))) + ":" + 
+          str(int( (tot_time % 3600) / 60)) + ":" + str(int((tot_time % 3600) % 60)))
+       
+
 def get_input_args():
     """
-    Retrieves and parses the command line arguments created and defined using
-    the argparse module. This function returns these arguments as an
-    ArgumentParser object.
+    Parse command line arguments.
+    usage: predict.py [-h] [--top_k TOP_K] [--category_names CATEGORY_NAMES]
+                  [--gpu] [--input_category INPUT_CATEGORY]
+                  input checkpoint
+    positional arguments:
+      input                 full path name to input image file; example:
+                            flowers/valid/63/image_05876.jpg; 
+      checkpoint            the full path to a checkpoint file *.pth of a trained
+                            network; example: model_checkpoints/checkpoint.pth
+    optional arguments:
+      -h, --help            show this help message and exit
+      --top_k TOP_K         top k results from classifier; integer number
+      --category_names CATEGORY_NAMES
+                            the full path to a *.json file mapping categories to
+                            names; example: cat_to_name.json   
     Parameters:
-     None - simply using argparse module to create & store command line arguments
+        None
     Returns:
-     parse_args() -data structure that stores the command line arguments object  
+        parse_args() - data structure that stores the command line arguments object
     """
-    # Creates parse 
     parser = argparse.ArgumentParser()
-
-    # Create command line arguments args.dir 
-    parser.add_argument('--pth', type=str, default='vgg.pth', help='file path')
-    parser.add_argument('--dir', type=str, default='flowers/valid/1/image_06739.jpg', help='select image dir')
-
-    
-    # returns parsed argument collection
+    parser.add_argument('--input', action="store", type=str, default='/home/workspace/aipnd-project/flowers/valid/1/image_06749.jpg',
+                        help='full path name to input image file; example: /home/workspace/aipnd-project/flowers/valid/1/image_06739.jpg')
+    parser.add_argument('--checkpoint', action="store", type=str, default='checkpoint.pth',
+                        help='the full path to a checkpoint file *.pth of a trained network; example: checkpoint.pth')
+    parser.add_argument('--top_k', type=int, default=5,
+                        help='top k results from classifier; integer number')
+    parser.add_argument('--category_names', type=str, default='cat_to_name.json',
+                        help='the full path to a *.json file mapping categories to names; example: cat_to_name.json')
     return parser.parse_args()
 
-#Label
-import json
-with open('cat_to_name.json', 'r') as f:
-    cat_to_name = json.load(f)
 
-#Building and training the classifier
-## We check whether GPU is available on PC or not otherwise we use CPU.
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(device)
-
-vgg16 = models.vgg16(pretrained=True).to(device)
-densenet121 = models.densenet121(pretrained=True).to(device)
-
-
-# Loading the checkpoint
-def load_checkpoint(filepath_pth):
-    if filepath_pth == 'vgg.pth':
-        checkpoint = torch.load('vgg.pth')
-        reloaded_model = models.vgg16(pretrained=False).to(device)
-        classifier = nn.Sequential(OrderedDict(
-                          [('fc1', nn.Linear(in_features=25088,out_features=4096)), 
-                           ('dropout1', nn.Dropout(0.15)),
-                           ('relu1', nn.ReLU()), 
-                           ('fc2',nn.Linear(in_features=4096, out_features=512)),
-                           ('dropout2', nn.Dropout(0.15)), 
-                           ('relu2',nn.ReLU()), 
-                           ('fc3',nn.Linear(in_features=512,out_features=102)),
-                           ('output', nn.LogSoftmax(dim=1))
-                           ]))
-        reloaded_model.classifier = classifier
-        reloaded_model.load_state_dict(checkpoint['model_dict'])
-        criterion = nn.CrossEntropyLoss().to(device)
-        optimizer = optim.SGD(reloaded_model.classifier.parameters(), lr=0.01, momentum=0.9)
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        criterion.load_state_dict(checkpoint['loss'])
-        reloaded_model = reloaded_model.to(device)
-        return reloaded_model, optimizer, criterion, checkpoint['class_to_idx']
-
-    else:
-        checkpoint = torch.load('densenet.pth')
-        reloaded_model = models.densenet121(pretrained=False).to(device)
-        classifier = nn.Sequential(OrderedDict([
-                          ('fc1', nn.Linear(in_features=1024, out_features=512)),
-                          ('dropout1',nn.Dropout(0.5)),
-                          ('relu1', nn.ReLU()), 
-                          ('fc2', nn.Linear(in_features=512, out_features=102)),
-                          ('output', nn.LogSoftmax(dim=1))
-                          ]))
-        reloaded_model.classifier = classifier
-        reloaded_model.load_state_dict(checkpoint['model_dict'])
-        criterion = nn.CrossEntropyLoss().to(device)
-        optimizer = optim.SGD(
-        reloaded_model.classifier.parameters(), lr=0.01, momentum=0.9)
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        criterion.load_state_dict(checkpoint['loss'])
-        reloaded_model = reloaded_model.to(device)
-        return reloaded_model, optimizer, criterion, checkpoint['class_to_idx']
-                
-
-def process_image(image_dir,normalize=True):
-    ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
-        returns an Numpy array
-    '''
-    img = Image.open(image_dir)
-    img = img.convert('RGB')
-    img = np.array(img.resize((256,256)).crop((16,16,240,240))) ##Cropping image from center to get (224,224)
-    to_tensor = transforms.ToTensor() ## Transoforming image to tensor so that image with pixel values 
-    img = to_tensor(img)              ## between 0-255 gets transformed to 0-1 floats which our model expects.
-    img = img.numpy()       ## Converting to numpy array fromm pytorch tensor for normalizatioin operation below.
-    #print(img)
-    img = img.transpose((1,2,0)) ## Converting image to (224,224,3) to do normalization with mean and std.
-    mean = np.array([0.485,0.456,0.406])
-    std = np.array([0.229,0.224,0.225])
-    if normalize:
-        img = ((img - mean) / std)
-    img = img.transpose((2,0,1)) ## Converting image back to (3,224,224) which our model expects for precition. 
-    img = torch.tensor(img,dtype=torch.float32) ## Converting back to pytorch tensor.
-    return img
-
-
-def predict(image_dir, filepath_pth, topk=5):
-    ''' Predict the class (or classes) of an image using a trained deep learning model.
-    '''
-    # TODO: Implement the code to predict the class from an image file
-    with torch.no_grad():    
-        img = process_image(image_dir)
-        model, optimizer, loss, class_to_idx = load_checkpoint(filepath_pth)
-        output = model.forward(img.unsqueeze(0).to(device) if len(img.size())==3 else img.to(device))
-        top_5_probs,classes = output.topk(topk)
-        return top_5_probs, classes
-
-
-# Call to main function to run the program
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
