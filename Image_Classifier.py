@@ -36,6 +36,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms, models
 from torch.autograd import Variable
+from math import floor
 
 def main():
     print("This script contains functions and classes relating to train.py and predict.py")
@@ -306,6 +307,14 @@ def process_image(image,normalize=True):
     '''
     img = Image.open(image)
     img = img.convert('RGB')
+    if img.width > img.height:
+        ratio = float(img.width) / float(img.height)
+        newheight = ratio * img.size[0]
+        img = img.resize((img.size[0], int(floor(newheight))), Image.ANTIALIAS)
+    else:
+        ratio = float(img.height) / float(img.width)
+        newwidth = ratio * img.size[0]
+        img = img.resize((int(floor(newwidth)), img.size[0]), Image.ANTIALIAS)
     img = np.array(img.resize((256,256)).crop((16,16,240,240))) ##Cropping image from center to get (224,224)
     to_tensor = transforms.ToTensor() ## Transoforming image to tensor so that image with pixel values 
     img = to_tensor(img)              ## between 0-255 gets transformed to 0-1 floats which our model expects.
@@ -356,6 +365,7 @@ def predict(image_path, model, topk=5):
         output = model.forward(img.unsqueeze(0).to(device) if len(img.size())==3 else img.to(device))
         top_5_probs,classes = output.topk(topk)
         return top_5_probs, classes
+
 
 if __name__ == '__main__':
     main()
